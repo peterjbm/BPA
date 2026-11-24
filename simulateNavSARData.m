@@ -21,6 +21,11 @@ function [nav, radar, antenna, truth] = simulateNavSARData(p)
 %  .nav_err: residual INS position error not seen by the processor,    %
 %           .amp [E N U] (m), .T periods (s); a smooth sum of          %
 %           sinusoids, with the matching velocity error         [none] %
+%  .nav_single: store lat/lon/alt in single precision (~0.4 m lat/lon %
+%           resolution), as some INS output formats do         [false] %
+%  .nav_time_offset: nav records are time-stamped this much later than %
+%           the radar clock (s); the correct nav_opts.time_offset is   %
+%           this value                                            [0]  %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 c = 299792458;
@@ -35,6 +40,8 @@ Rg = p.Yc; Rc = sqrt(p.Yc^2 + p.H^2);
 if ~isfield(p,'SNR_dB'),        p.SNR_dB = Inf;      end
 if ~isfield(p,'nav_pos_noise'), p.nav_pos_noise = 0; end
 if ~isfield(p,'nav_err'), p.nav_err = struct('amp', [0 0 0], 'T', 1); end
+if ~isfield(p,'nav_time_offset'), p.nav_time_offset = 0; end
+if ~isfield(p,'nav_single'), p.nav_single = false; end
 if ~isfield(p,'nav_att_noise'), p.nav_att_noise = 0; end
 
 antenna = p.antenna;
@@ -137,7 +144,11 @@ for k = 1:numel(tn)
     nav.vN(k) = vned(1); nav.vE(k) = vned(2); nav.vD(k) = vned(3);
 end
 An = An/d2r + p.nav_att_noise*randn(size(An));
-nav.t = tn; nav.roll = An(1,:); nav.pitch = An(2,:); nav.yaw = mod(An(3,:), 360);
+if p.nav_single   % quantize what the INS reports (velocity keeps full precision)
+    nav.lat = double(single(nav.lat)); nav.lon = double(single(nav.lon));
+    nav.alt = double(single(nav.alt));
+end
+nav.t = tn + p.nav_time_offset; nav.roll = An(1,:); nav.pitch = An(2,:); nav.yaw = mod(An(3,:), 360);
 
 truth.targets_enu = Tenu; truth.targets_lat = tla; truth.targets_lon = tlo;
 truth.targets_h = th; truth.apc = apc; truth.scene_center = ref;

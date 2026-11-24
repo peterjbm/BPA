@@ -29,6 +29,17 @@ function geom = navToPulses(nav, t_pulse, ref, antenna, opts)
 % opts:                                                                %
 %   .interp      'hermite' (uses velocity) or 'linear'   ['hermite']   %
 %   .time_offset Added to t_pulse to put it on the nav clock (s) [0]   %
+%   .position_source  'velocity': build the trajectory by integrating  %
+%                the nav velocity, anchored to the nav positions by a  %
+%                least-squares fit (see .anchor).  Use this when the   %
+%                reported positions jitter (GPS updates, filter resets,%
+%                single-precision lat/lon): SAR needs smooth relative  %
+%                motion, which integrated INS velocity gives.          %
+%                'nav': interpolate the reported positions  ['velocity']%
+%   .anchor      How integrated positions are tied to nav positions:   %
+%                'first' record, 'mean' offset, or 'linear' (offset    %
+%                plus drift; also removes a constant velocity bias)    %
+%                                                        ['linear']    %
 %   .verbose     Print diagnostics                          [true]     %
 %                                                                      %
 % geom (per pulse, ENU):                                               %
@@ -43,6 +54,8 @@ if nargin < 5, opts = struct(); end
 if ~isfield(opts,'interp'),      opts.interp = 'hermite'; end
 if ~isfield(opts,'time_offset'), opts.time_offset = 0;    end
 if ~isfield(opts,'verbose'),     opts.verbose = true;     end
+if ~isfield(opts,'position_source'), opts.position_source = 'velocity'; end
+if ~isfield(opts,'anchor'),      opts.anchor = 'linear';  end
 if ~isfield(antenna,'lever_arm'), antenna.lever_arm = [0;0;0]; end
 if ~isfield(antenna,'look'),      antenna.look = 'right';      end
 if ~isfield(antenna,'squint'),    antenna.squint = 0;          end
@@ -71,10 +84,41 @@ if Nn > 2
         fprintf('Nav: %d records, interval %.4f s (%.1f Hz), velocity vs. position RMS mismatch %.3f m/s\n', ...
             Nn, median(dt), 1/median(dt), vres);
     end
-    if vres > 0.05*sqrt(mean(sum(vmid.^2,1))) + 0.2
+    if opts.verbose && vres > 0.05*sqrt(mean(sum(vmid.^2,1))) + 0.2
         warning(['navToPulses: nav velocity disagrees with differenced positions ' ...
-            '(%.2f m/s RMS). Check the NED convention and time tags.'], vres);
+            '(%.2f m/s RMS). Check the NED convention and time tags; jittery ' ...
+            'positions are handled by position_source = ''velocity''.'], vres);
     end
+end
+
+% ---- Trajectory from integrated velocity ---------------------------------
+switch lower(opts.position_source)
+    case 'velocity'
+        % Trapezoidal integral of velocity (exact for velocity varying
+        % linearly between records), then tie to the nav positions
+        inc  = (Vn(:,1:end-1) + Vn(:,2:end))/2 .* repmat(diff(tn), 3, 1);
+        Pint = [zeros(3,1) cumsum(inc, 2)];
+        d = Pn - Pint;
+        switch lower(opts.anchor)
+            case 'first',  fit = repmat(d(:,1), 1, Nn);
+            case 'mean',   fit = repmat(mean(d,2), 1, Nn);
+            case 'linear'
+                tc = tn - mean(tn);
+                b  = (d - repmat(mean(d,2),1,Nn)) * tc' / (tc*tc');
+                fit = repmat(mean(d,2),1,Nn) + b*tc;
+            otherwise, error('navToPulses: unknown anchor ''%s''', opts.anchor);
+        end
+        Pnew = Pint + fit;
+        if opts.verbose
+            jit = Pn - Pnew;
+            fprintf(['Trajectory from integrated velocity (%s anchor): nav positions differ ' ...
+                'by %.3f m RMS (max %.3f m) - position jitter/drift not used\n'], ...
+                opts.anchor, sqrt(mean(sum(jit.^2,1))), max(sqrt(sum(jit.^2,1))));
+        end
+        Pn = Pnew;
+    case 'nav'
+    otherwise
+        error('navToPulses: unknown position_source ''%s''', opts.position_source);
 end
 
 % ---- Interpolate to pulse times -----------------------------------------

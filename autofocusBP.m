@@ -71,15 +71,10 @@ for outer = 1:numel(af_opts.block)
     blk = ceil((1:Np)/bsz);
     Nb = blk(end);
     % ---- Select bright pixels, spread along track ----------------------
-    sel = selectPixels(abs(img_cur.im).^2, img_cur.hits, af_opts.n_pixels, af_opts.n_tiles);
+    sel = selectBrightPixels(abs(img_cur.im).^2, img_cur.hits, af_opts.n_pixels, af_opts.n_tiles);
 
     % ---- Per-block contributions at those pixels (sub-grid backprojection)
-    [~, col] = ind2sub(size(grid.X), sel);
-    sg = grid;
-    sg.X = grid.X(sel)'; sg.Y = grid.Y(sel)'; sg.Z = grid.Z(sel)';
-    sg.along_vec = grid.along_vec(col);
-    sg.dpx = abs(mean(diff(grid.along_vec)));
-    sg.corners = [grid.X([1 end 1 end]); grid.Y([1 end 1 end]); grid.Z([1 end 1 end])];
+    sg = makeSubGrid(grid, sel);
     o = bp_opts; o.verbose = false;
     o.store_pixels = 1:numel(sel); o.block = bsz;
     r = bpNav(radar_af, geom, sg, o);
@@ -151,20 +146,3 @@ af.block = af_opts.block;
 
 end
 
-
-function sel = selectPixels(pw, hits, K, ntiles)
-% Brightest pixels, the same number from each along-track tile
-[~, Nx] = size(pw);
-pw(hits == 0) = 0;
-edges = round(linspace(0, Nx, ntiles+1));
-per = ceil(K/ntiles);
-sel = [];
-for t = 1:ntiles
-    cols = edges(t)+1:edges(t+1);
-    tile = pw(:, cols);
-    [~, ord] = sort(tile(:), 'descend');
-    ord = ord(1:min(per, nnz(tile)));
-    [r, c] = ind2sub(size(tile), ord);
-    sel = [sel; sub2ind(size(pw), r, cols(c)')]; %#ok<AGROW>
-end
-end

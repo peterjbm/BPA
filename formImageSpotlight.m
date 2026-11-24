@@ -47,6 +47,9 @@ if use_simulated
     % Residual INS position error the processor does not know about
     % (what autofocus must remove); set amp to [0 0 0] for perfect nav
     p.nav_err = struct('amp', [0.03 0.03 0.02], 'T', [0.7 1.6 3.3]);
+    p.nav_single = true;          % INS reports lat/lon in single precision
+                                  % (position jitter of ~0.2 m)
+    p.nav_time_offset = 0.02;     % Nav time tags 20 ms late vs. radar clock
     [nav, radar, antenna, truth] = simulateNavSARData(p);
     aim = p.ref;
 else
@@ -58,8 +61,15 @@ else
 end
 
 %% 2. NAVIGATION -> PULSE GEOMETRY %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+nav_opts.position_source = 'velocity';  % Trajectory from integrated INS
+                              % velocity (smooth); 'nav' = interpolate the
+                              % reported positions (use only if they are
+                              % smooth to a few mm)
+nav_opts.anchor = 'linear';   % Tie integrated track to nav positions:
+                              % 'first' | 'mean' | 'linear' (fits drift)
 nav_opts.interp = 'hermite';  % 'hermite' (uses velocity) or 'linear'
-nav_opts.time_offset = 0;     % Radar-to-nav clock offset (s)
+nav_opts.time_offset = 0;     % Radar-to-nav clock offset (s): pulse n is
+                              % at nav time t_pulse(n) + time_offset
 
 ref = aim;                    % Local ENU origin at the aim point
 geom = navToPulses(nav, radar.t_pulse, ref, antenna, nav_opts);
@@ -96,6 +106,18 @@ taper_flag = 1;               % Hanning taper across pulses (sidelobe control)
 if taper_flag
     Np = size(radar.rc, 2);
     radar.rc = radar.rc .* repmat(0.5 - 0.5*cos(2*pi*(1:Np)/(Np+1)), size(radar.rc,1), 1);
+end
+% Radar/nav clock offset estimated from the data by maximizing focus
+% (estimateNavTimeOffset).  Only reliable when the timing error dominates
+% the other motion errors (see its header); otherwise set
+% nav_opts.time_offset from a calibration and let autofocus remove the
+% remaining phase error.
+timing_flag = 0;
+t_opts.range = 0.05;          % Search +/- this around nav_opts.time_offset (s)
+if timing_flag
+    [nav_opts.time_offset, t_est] = estimateNavTimeOffset(nav, radar, ref, ...
+        antenna, nav_opts, grid, bp_opts, t_opts);
+    geom = navToPulses(nav, radar.t_pulse, ref, antenna, nav_opts);
 end
 img = bpNav(radar, geom, grid, bp_opts);
 
@@ -159,8 +181,8 @@ end
 
 if use_simulated
     if af_flag
-        fprintf('\nBefore autofocus:'); reportPointTargets(img_noaf, grid, truth, 5);
-        fprintf('\nAfter autofocus:'); reportPointTargets(img, grid, truth, 5);
+        fprintf('\nBefore autofocus:'); reportPointTargets(img_noaf, grid, truth, 12);
+        fprintf('\nAfter autofocus:'); reportPointTargets(img, grid, truth, 12);
     else
         reportPointTargets(img, grid, truth);
     end

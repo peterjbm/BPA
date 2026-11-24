@@ -19,9 +19,10 @@ GPU-accelerated backprojection for synthetic aperture radar imaging developed at
 
 `formImageStripmap.m` and `formImageSpotlight.m` form images from range-compressed pulses plus navigation records (WGS-84 lat/lon/alt, roll/pitch/yaw, NED velocity). Both run on simulated data out of the box; set `use_simulated = 0` and fill in the "LOAD YOUR DATA" section for real data.
 
-* `navToPulses.m`: interpolates nav to each pulse time (cubic Hermite using the velocity, so the nav rate may be slower or faster than the PRF), applies the INS-to-antenna lever arm and the antenna boresight through the attitude, in a local ENU frame
+* `navToPulses.m`: builds the trajectory by integrating the INS velocity (anchored to the nav positions, so position jitter from GPS updates or single-precision lat/lon is not used; `position_source = 'nav'` interpolates positions instead), interpolates to each pulse time (cubic Hermite using the velocity, so the nav rate may be slower or faster than the PRF), applies the INS-to-antenna lever arm and the antenna boresight through the attitude, in a local ENU frame
 * `makeGeoImageGrid.m`: track-aligned image grid on the ellipsoid or a DEM, with lat/lon for every pixel
 * `bpNav.m`: backprojection; stripmap mode gates each pulse to the measured beam footprint, spotlight mode integrates every pulse
+* `estimateNavTimeOffset.m`: estimates a radar-to-nav clock offset by maximizing focus (reliable only when timing dominates other motion errors; a surveyed corner reflector is the robust calibration)
 * `autofocusBP.m`: autofocus on the time-domain backprojection output, correcting residual motion errors the navigation misses: per-block pulse phases maximize image sharpness by coordinate descent (after Ash, IEEE GRSL 2012), coarse-to-fine; works for stripmap and spotlight; enabled by `af_flag` in both scripts
 * `simulateNavSARData.m`: simulated collection (weaving flight, attitude oscillation, lever arm) for testing; `reportPointTargets.m` checks focus against truth
 * `navutils/`: toolbox-free WGS-84 / ECEF / ENU / NED / Euler conversions
