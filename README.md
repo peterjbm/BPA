@@ -15,6 +15,18 @@ GPU-accelerated backprojection for synthetic aperture radar imaging developed at
 * non-Matlab data loaders, pre-processors, and visualization
 * Matlab-only MEX interface
 
+### Stripmap and spotlight imaging with INS/GPS navigation (MATLAB / Octave):
+
+`formImageStripmap.m` and `formImageSpotlight.m` form images from range-compressed pulses plus navigation records (WGS-84 lat/lon/alt, roll/pitch/yaw, NED velocity). Both run on simulated data out of the box; set `use_simulated = 0` and fill in the "LOAD YOUR DATA" section for real data.
+
+* `navToPulses.m`: interpolates nav to each pulse time (cubic Hermite using the velocity, so the nav rate may be slower or faster than the PRF), applies the INS-to-antenna lever arm and the antenna boresight through the attitude, in a local ENU frame
+* `makeGeoImageGrid.m`: track-aligned image grid on the ellipsoid or a DEM, with lat/lon for every pixel
+* `bpNav.m`: backprojection; stripmap mode gates each pulse to the measured beam footprint, spotlight mode integrates every pulse
+* `simulateNavSARData.m`: simulated collection (weaving flight, attitude oscillation, lever arm) for testing; `reportPointTargets.m` checks focus against truth
+* `navutils/`: toolbox-free WGS-84 / ECEF / ENU / NED / Euler conversions
+
+Conventions: body axes x forward, y right, z down; Z-Y-X Euler angles with yaw from true north; `radar.tau0` is the two-way delay of the first range sample; nav and pulse times share one clock (`nav_opts.time_offset` corrects a known offset).
+
 ### Required packages:
 
 * Python
