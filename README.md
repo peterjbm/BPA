@@ -22,6 +22,7 @@ GPU-accelerated backprojection for synthetic aperture radar imaging developed at
 * `navToPulses.m`: interpolates nav to each pulse time (cubic Hermite using the velocity, so the nav rate may be slower or faster than the PRF), applies the INS-to-antenna lever arm and the antenna boresight through the attitude, in a local ENU frame
 * `makeGeoImageGrid.m`: track-aligned image grid on the ellipsoid or a DEM, with lat/lon for every pixel
 * `bpNav.m`: backprojection; stripmap mode gates each pulse to the measured beam footprint, spotlight mode integrates every pulse
+* `autofocusBP.m`: autofocus on the time-domain backprojection output, correcting residual motion errors the navigation misses: per-block pulse phases maximize image sharpness by coordinate descent (after Ash, IEEE GRSL 2012), coarse-to-fine; works for stripmap and spotlight; enabled by `af_flag` in both scripts
 * `simulateNavSARData.m`: simulated collection (weaving flight, attitude oscillation, lever arm) for testing; `reportPointTargets.m` checks focus against truth
 * `navutils/`: toolbox-free WGS-84 / ECEF / ENU / NED / Euler conversions
 

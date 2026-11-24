@@ -44,6 +44,9 @@ if use_simulated
                    20    20 0 1.0;
                   -20   -20 0 1.0 ];
     p.SNR_dB = 0;
+    % Residual INS position error the processor does not know about
+    % (what autofocus must remove); set amp to [0 0 0] for perfect nav
+    p.nav_err = struct('amp', [0.03 0.03 0.02], 'T', [0.7 1.6 3.3]);
     [nav, radar, antenna, truth] = simulateNavSARData(p);
     aim = p.ref;
 else
@@ -96,6 +99,21 @@ if taper_flag
 end
 img = bpNav(radar, geom, grid, bp_opts);
 
+%% 4b. AUTOFOCUS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Corrects residual motion errors (INS drift, lever-arm/timing errors)
+% directly on the time-domain backprojection output.  See autofocusBP.
+af_flag = 1;
+af_opts.block = [64 16 4];    % Pulses per phase estimate, coarse to fine;
+                              % last stage shorter than the fastest residual
+                              % motion period
+af_opts.n_pixels = 5000;      % Bright pixels used for the sharpness metric
+af_opts.n_iter = 20;          % Max coordinate-descent passes per stage
+
+img_noaf = img;
+if af_flag
+    [img, af] = autofocusBP(radar, geom, grid, bp_opts, img_noaf, af_opts);
+end
+
 %% 5. DISPLAY / SAVE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 dyn_range = 50;
 out_file = '';                % e.g. 'spotlight_image.mat' to save
@@ -105,10 +123,47 @@ figure
 imagesc(grid.along_vec, grid.cross_vec, im_dB);
 colormap(green14); axis image xy; caxis([-dyn_range 0]); colorbar
 xlabel('Cross-range (m)'); ylabel('Down-range, + away from radar (m)');
-title('Spotlight backprojection (dB)');
+title('Spotlight backprojection, autofocused (dB)');
+
+if af_flag
+    nf_dB = 20*log10(abs(img_noaf.im) + eps);  nf_dB = nf_dB - max(nf_dB(:));
+    figure
+    imagesc(grid.along_vec, grid.cross_vec, nf_dB);
+    colormap(green14); axis image xy; caxis([-dyn_range 0]); colorbar
+    xlabel('Cross-range (m)'); ylabel('Down-range (m)');
+    title('Before autofocus (dB)');
+
+    figure
+    tp = geom.t - geom.t(1);
+    plot(tp, af.phi_pulse, 'b'); hold on
+    leg = {'autofocus estimate'};
+    if use_simulated && isfield(truth, 'nav_err_pulse')
+        % True correction: 4*pi/lambda * (line of sight . nav error).
+        % Compare modulo 2*pi after removing the best-fit constant + linear
+        % phase, which only shift the image and cannot be estimated.
+        los = repmat(grid.center_enu, 1, numel(tp)) - geom.apc;
+        los = los ./ repmat(sqrt(sum(los.^2,1)), 3, 1);
+        ph_true = 4*pi/lambda * sum(los .* truth.nav_err_pulse, 1);
+        d = exp(1i*(af.phi_pulse - ph_true));
+        M = 16*numel(d); [~, m] = max(abs(fft(d, M)));
+        d = d .* exp(-2i*pi*(m-1)*(0:numel(d)-1)/M);
+        resid = angle(d * exp(-1i*angle(sum(d))));
+        plot(tp, af.phi_pulse - resid, 'r--');
+        leg{end+1} = 'truth (aligned)';
+        fprintf('Autofocus phase vs. truth: %.2f rad RMS residual; nav-induced phase error was %.2f rad RMS\n', ...
+            sqrt(mean(resid.^2)), std(ph_true));
+    end
+    xlabel('Time (s)'); ylabel('Phase correction (rad)'); legend(leg);
+    title('Autofocus phase correction');
+end
 
 if use_simulated
-    reportPointTargets(img, grid, truth);
+    if af_flag
+        fprintf('\nBefore autofocus:'); reportPointTargets(img_noaf, grid, truth, 5);
+        fprintf('\nAfter autofocus:'); reportPointTargets(img, grid, truth, 5);
+    else
+        reportPointTargets(img, grid, truth);
+    end
 end
 if ~isempty(out_file)
     image = img.im; lat = grid.lat; lon = grid.lon; h = grid.h; %#ok<NASGU>

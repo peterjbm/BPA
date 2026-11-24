@@ -32,9 +32,13 @@ function img = bpNav(radar, geom, grid, opts)
 %              flight time; false = receive position = transmit        %
 %              position + velocity * delay                  [false]    %
 %   .verbose   Progress messages                            [true]     %
+%   .store_pixels  Linear pixel indices at which to keep per-block     %
+%              contributions (for autofocusBP)                  [[]]   %
+%   .block     Pulses per block for .store_pixels               [1]    %
 %                                                                      %
 % img.im      Complex image (size of grid.X)                           %
 % img.hits    Number of pulses integrated per pixel                    %
+% img.contrib Nblocks x numel(store_pixels) contributions (if asked)   %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 c = 299792458;
@@ -46,6 +50,8 @@ if ~isfield(opts,'ant_weight'),   opts.ant_weight = false; end
 if ~isfield(opts,'upsample'),     opts.upsample = 8;      end
 if ~isfield(opts,'stop_and_hop'), opts.stop_and_hop = false; end
 if ~isfield(opts,'verbose'),      opts.verbose = true;    end
+if ~isfield(opts,'store_pixels'), opts.store_pixels = []; end
+if ~isfield(opts,'block'),        opts.block = 1;         end
 
 strip = strcmpi(opts.mode, 'stripmap');
 if strip && ~isfield(opts,'bw_az')
@@ -77,11 +83,26 @@ fsU = radar.fs * U;
 img.im   = zeros(Ny, Nx);
 img.hits = zeros(Ny, Nx);
 
+% Optional: keep each pulse block's time-domain contribution at selected
+% pixels (used by autofocusBP).  contrib(k,j) = sum over pulses in block k
+% of the backprojected value at pixel store_pixels(j).
+store = ~isempty(opts.store_pixels);
+if store
+    slot = zeros(Ny, Nx);
+    slot(opts.store_pixels) = 1:numel(opts.store_pixels);
+    img.block_of_pulse = ceil((1:Np)/opts.block);
+    img.contrib = zeros(img.block_of_pulse(end), numel(opts.store_pixels));
+end
+
 % Along-track pixel coordinate of each column (for the stripmap prefilter)
 if strip
     col_along = grid.along_vec;
-    dpx = abs(mean(diff(col_along)));
-    corners = [grid.X([1 end 1 end]); grid.Y([1 end 1 end]); grid.Z([1 end 1 end])];
+    if isfield(grid,'dpx'), dpx = grid.dpx; else dpx = abs(mean(diff(col_along))); end
+    if isfield(grid,'corners')         % sub-grids carry the full grid's corners
+        corners = grid.corners;
+    else
+        corners = [grid.X([1 end 1 end]); grid.Y([1 end 1 end]); grid.Z([1 end 1 end])];
+    end
 end
 
 if opts.verbose
@@ -140,18 +161,29 @@ for n = 1:Np
         end
     end
 
-    I = find(mask);
-    if isempty(I), continue; end
-    i0 = floor(fi(I)); fr = fi(I) - i0;
+    I = find(mask(:));                      % column vectors throughout, so
+    if isempty(I), continue; end            % single-row grids work too
+    fI = fi(:); fI = fI(I);
+    i0 = floor(fI); fr = fI - i0;
     prof = rcu(:,n);
+    tI = tau(:);
     val = prof(i0).*(1-fr) + prof(i0+1).*fr;
-    val = val .* exp(1i*radar.phase_sign*2*pi*radar.fc*tau(I));
+    val = val .* exp(1i*radar.phase_sign*2*pi*radar.fc*tI(I));
     if opts.ant_weight
-        val = val .* nav_sinc(opts.D/lambda*sin(th(I))).^2;
+        thI = th(:);
+        val = val .* nav_sinc(opts.D/lambda*sin(thI(I))).^2;
     end
 
-    sub = img.im(:,cols);   sub(I) = sub(I) + val;   img.im(:,cols) = sub;
-    hs  = img.hits(:,cols); hs(I) = hs(I) + 1;       img.hits(:,cols) = hs;
+    sub = img.im(:,cols);   sub(I) = sub(I) + reshape(val, size(sub(I)));   img.im(:,cols) = sub;
+    hs  = img.hits(:,cols); hs(I) = hs(I) + 1;                             img.hits(:,cols) = hs;
+
+    if store
+        sl = slot(:,cols); sl = sl(:); sl = sl(I); hit = sl > 0;
+        if any(hit)
+            k = img.block_of_pulse(n);
+            img.contrib(k, sl(hit)) = img.contrib(k, sl(hit)) + val(hit).';
+        end
+    end
 end
 if opts.verbose, fprintf('bpNav done in %.1f s\n', toc(tstart)); end
 

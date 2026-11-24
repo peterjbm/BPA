@@ -1,6 +1,12 @@
-function rep = reportPointTargets(img, grid, truth)
+function rep = reportPointTargets(img, grid, truth, max_shift)
 % Prints peak position error, -3 dB widths and peak level for each
 % simulated point target (truth from simulateNavSARData).
+% max_shift (m, default 0): first search +/- max_shift for the common
+% image shift that best lines the targets up (navigation errors that grow
+% linearly over the aperture displace the image without defocusing it,
+% and autofocus cannot see or remove such a shift).  Errors are then
+% reported relative to the shifted truth.
+if nargin < 4, max_shift = 0; end
 
 A = abs(img.im);
 Amax = max(A(:));
@@ -8,7 +14,23 @@ Tenu = nav_geodetic2enu(truth.targets_lat, truth.targets_lon, truth.targets_h, g
 Tp = Tenu - repmat(grid.center_enu, 1, size(Tenu,2));
 t_al = grid.u_along' * Tp;  t_cr = grid.u_cross' * Tp;
 da = mean(diff(grid.along_vec)); dc = mean(diff(grid.cross_vec));
-fprintf('\n tgt   true along/cross (m)   error along/cross (m)   -3dB width along/cross (m)   peak (dB)\n');
+sa = 0; sc = 0;
+if max_shift > 0
+    na = round(max_shift/da); nc = round(max_shift/dc); best = -1;
+    ia0 = round((t_al - grid.along_vec(1))/da) + 1;
+    ic0 = round((t_cr - grid.cross_vec(1))/dc) + 1;
+    for ka = -na:na
+        for kc = -nc:nc
+            ia = ia0 + ka; ic = ic0 + kc;
+            ok = ia >= 1 & ia <= size(A,2) & ic >= 1 & ic <= size(A,1);
+            v = sum(A(sub2ind(size(A), ic(ok), ia(ok))));
+            if v > best, best = v; sa = ka*da; sc = kc*dc; end
+        end
+    end
+    fprintf('\n Common image shift: %.2f m along, %.2f m cross\n', sa, sc);
+    t_al = t_al + sa; t_cr = t_cr + sc;
+end
+fprintf(' tgt   true along/cross (m)   error along/cross (m)   -3dB width along/cross (m)   peak (dB)\n');
 rep = zeros(numel(t_al), 5);
 for t = 1:numel(t_al)
     [~, ix] = min(abs(grid.along_vec - t_al(t)));

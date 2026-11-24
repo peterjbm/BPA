@@ -18,6 +18,9 @@ function [nav, radar, antenna, truth] = simulateNavSARData(p)
 %  .antenna: .lever_arm .squint .D  (look is right)                    %
 %  .azSpan (deg, spotlight aperture)   .along_extent [s0 s1] (optional)%
 %  .SNR_dB  .nav_pos_noise (m)  .nav_att_noise (deg)                   %
+%  .nav_err: residual INS position error not seen by the processor,    %
+%           .amp [E N U] (m), .T periods (s); a smooth sum of          %
+%           sinusoids, with the matching velocity error         [none] %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 c = 299792458;
@@ -31,6 +34,7 @@ uz = [0;0;1];
 Rg = p.Yc; Rc = sqrt(p.Yc^2 + p.H^2);
 if ~isfield(p,'SNR_dB'),        p.SNR_dB = Inf;      end
 if ~isfield(p,'nav_pos_noise'), p.nav_pos_noise = 0; end
+if ~isfield(p,'nav_err'), p.nav_err = struct('amp', [0 0 0], 'T', 1); end
 if ~isfield(p,'nav_att_noise'), p.nav_att_noise = 0; end
 
 antenna = p.antenna;
@@ -123,6 +127,8 @@ radar.B = p.B; radar.t_pulse = t_pulse; radar.phase_sign = 1;
 % ---- Navigation records (INS point, not the APC) -------------------------
 tn = (t_pulse(1) - 0.5):(1/p.nav_rate):(t_pulse(end) + 0.5);
 Pn = pos(tn); Vn = vel(tn); An = att(tn);
+[eP, eV] = navError(tn, p.nav_err);
+Pn = Pn + eP; Vn = Vn + eV;
 Pn = Pn + p.nav_pos_noise*randn(size(Pn));
 [nav.lat, nav.lon, nav.alt] = nav_enu2geodetic(Pn, ref);
 nav.vN = zeros(size(tn)); nav.vE = nav.vN; nav.vD = nav.vN;
@@ -135,9 +141,26 @@ nav.t = tn; nav.roll = An(1,:); nav.pitch = An(2,:); nav.yaw = mod(An(3,:), 360)
 
 truth.targets_enu = Tenu; truth.targets_lat = tla; truth.targets_lon = tlo;
 truth.targets_h = th; truth.apc = apc; truth.scene_center = ref;
+truth.nav_err_pulse = navError(t_pulse, p.nav_err);   % ENU APC error per pulse
 
 fprintf(['Simulated %s: %d pulses at %.0f Hz (PRT %.2f ms), nav at %.0f Hz ' ...
     '(interval %.2f ms), %d targets\n'], p.mode, Np, p.PRF, 1e3/p.PRF, ...
     p.nav_rate, 1e3/p.nav_rate, Nt);
 
+end
+
+
+function [e, de] = navError(t, ne)
+% Smooth residual INS error: per ENU axis, a sum of sinusoids with fixed
+% (repeatable) phases, scaled so each axis has RMS amplitude ne.amp.
+nT = numel(ne.T);
+e = zeros(3, numel(t)); de = e;
+for ax = 1:3
+    for i = 1:nT
+        w = 2*pi/ne.T(i); ps = 1.7*ax + 2.3*i;
+        g = ne.amp(ax)*sqrt(2/nT);
+        e(ax,:)  = e(ax,:)  + g*sin(w*t + ps);
+        de(ax,:) = de(ax,:) + g*w*cos(w*t + ps);
+    end
+end
 end
