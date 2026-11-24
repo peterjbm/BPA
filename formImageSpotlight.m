@@ -134,6 +134,9 @@ af_opts.n_iter = 20;          % Max coordinate-descent passes per stage
 img_noaf = img;
 if af_flag
     [img, af] = autofocusBP(radar, geom, grid, bp_opts, img_noaf, af_opts);
+    % What the autofocus had to correct, in terms of timing / lever-arm
+    % errors (hypotheses to confirm, see diagnoseResidualPhase)
+    af_diag = diagnoseResidualPhase(af, geom, grid, radar);
 end
 
 %% 5. DISPLAY / SAVE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

@@ -48,6 +48,7 @@ function geom = navToPulses(nav, t_pulse, ref, antenna, opts)
 %   .el_axis 3xNp antenna elevation axis (all unit vectors)            %
 %   .ins  3xNp INS position          .t    pulse times on nav clock    %
 %   .roll/.pitch/.yaw  interpolated attitude (deg)                     %
+%   .C    3x3xNp body -> ENU rotation at each pulse                    %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 if nargin < 5, opts = struct(); end
@@ -173,11 +174,12 @@ a_body = [1;0;0] - b_body(1)*b_body;                            % azimuth axis
 a_body = a_body / norm(a_body);
 e_body = cross(b_body, a_body);                                 % elevation axis
 
-geom.apc = zeros(3,Np); geom.bore = zeros(3,Np);
+geom.apc = zeros(3,Np); geom.bore = zeros(3,Np); geom.C = zeros(3,3,Np);
 geom.az_axis = zeros(3,Np); geom.el_axis = zeros(3,Np);
 lever = antenna.lever_arm(:);
 for n = 1:Np
     C = Renu * nav_ned2ecef_rot(plat(n), plon(n)) * nav_euler2dcm(roll(n), pitch(n), yaw(n));
+    geom.C(:,:,n)     = C;
     geom.apc(:,n)     = Pins(:,n) + C*lever;
     geom.bore(:,n)    = C*b_body;
     geom.az_axis(:,n) = C*a_body;
